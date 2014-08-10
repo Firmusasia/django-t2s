@@ -30,6 +30,7 @@ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 SUCH DAMAGE.
 """
 
+from time import gmtime, strftime
 from django.db import models
 from django.db.models.fields import CharField
 from django.contrib import admin
@@ -46,6 +47,7 @@ class Model(models.Model):
       ...
   """
   lang = models.IntegerField(default=1, choices=SUPPORTED_LANG)
+  update_keys = None
 
   def getLanguageDisplay(self):
     return SUPPORTED_LANG[self.lang][1]
@@ -65,13 +67,22 @@ class Model(models.Model):
     if XX doesn't define title filed, now it(program) will breaks,
     if we support the filter, this error will be ignored.
     """
-    fields = {}
+    fields = { 'defaults':{} }
     for name, value in kwargs.items():
-      fields[name] = convert(value)
+      val = value
+      if type(value) == str or type(value) == unicode:
+        val = convert(value, config='t2s')
+      try:
+        cls.update_keys.index(name)
+        fields[name] = val
+      except ValueError:
+        fields['defaults'][name] = val
+      except AttributeError:
+        fields[name] = val
     fields['lang'] = 2
-    inst, r = cls.objects.get_or_create(**fields)
-    # inst.save()
-    return r
+    del fields['defaults']['id']
+    print fields['title']
+    return cls.objects.get_or_create(**fields)
 
   class Meta:
     abstract = True
@@ -91,33 +102,62 @@ class ModelAdmin(admin.ModelAdmin):
     self._createDate = None
     self._hasModifyDate = False
     self._hasCreateDate = False
-    self._textFields = []
+    self._baseFields = []
+    self._richTextFields = []
 
     for field in model.getFields():
       if not self._hasModifyDate:
-        self._hasModifyDate = (field.name == 'modify_date' or field.name == 'modifyDate')
+        self._hasModifyDate = field.name == 'modify_date'
       if not self._hasCreateDate:
-        self._hasCreateDate = (field.name == 'create_date' or field.name == 'createDate')
-      if type(field) is CharField or type(field) is RichTextField:
-        self._textFields.append(field.name)
+        self._hasCreateDate = field.name == 'create_date'
+      if type(field) is RichTextField:
+        self._richTextFields.append(field)
+      else:
+        self._baseFields.append(field)
     self.coverCondition = self._hasModifyDate and self._hasCreateDate;
     super(ModelAdmin, self).__init__(model, admin_site)
-
 
   """
   Override `save_model`
   """
   def save_model(self, request, obj, form, change):
+    cur_time = gmtime()
     model = self.model
     lang = form.cleaned_data.get('lang')
     fields = {}
-    for name in self._textFields:
-      text = form.cleaned_data.get(name)
-      setattr(obj, name, convert(text, config='s2t'))
-      fields[name] = text
+
+    for field in self._baseFields:
+      val = form.cleaned_data.get(field.name)
+      if type(field) == CharField:
+        setattr(obj, field.name, convert(val, config='s2t'))
+      elif val:
+        setattr(obj, field.name, val)
+      fields[field.name] = val
+
+    if not lang:
+      lang = self.__lang__(form)
+    obj.lang = fields['lang'] = lang
+
+    if self._hasModifyDate:
+      fields['modify_date'] = strftime("%Y-%m-%d %H:%M:%S", cur_time)
+    if self._hasCreateDate:
+      fields['create_date'] = strftime("%Y-%m-%d %H:%M:%S", cur_time)
 
     if is_traditional(lang):
-      model.cloneWithSimplified(**fields)
+      simplifiedObj, isNew = model.cloneWithSimplified(**fields)
+      if (not (self._hasModifyDate and
+        not isNew and simplifiedObj.modify_date > obj.modify_date)):
+        for field in self._richTextFields:
+          text = form.cleaned_data.get(field.name)
+          setattr(simplifiedObj, field.name, convert(text))
+          fields[field.name] = text
+        simplifiedObj.save()
+
+    if self._hasModifyDate:
+      obj.modify_date = strftime("%Y-%m-%d %H:%M:%S", cur_time)
+    if self._hasCreateDate and not obj.create_date:
+      obj.create_date = strftime("%Y-%m-%d %H:%M:%S", cur_time)
+
     return super(ModelAdmin, self).save_model(request, obj, form, change)
 
   class Meta:
