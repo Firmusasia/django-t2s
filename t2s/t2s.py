@@ -52,6 +52,15 @@ class Model(models.Model):
   def getLanguageDisplay(self):
     return SUPPORTED_LANG[self.lang][1]
 
+  def getSimplifiedObject(self):
+    """
+    if you don't have `title` field or don't want to let this field
+    `title` be the key of language exchange, you should overwrite this
+    method
+    """
+    simplifiedTitle = convert(self.title, config='t2s')
+    return self.__class__.objects.filter(lang=2, title=simplifiedTitle)[0]
+
   @classmethod
   def getFields(cls):
     return cls._meta.fields
@@ -81,8 +90,13 @@ class Model(models.Model):
         fields[name] = val
     fields['lang'] = 2
     del fields['defaults']['id']
-    print fields['title']
-    return cls.objects.get_or_create(**fields)
+    obj, isNew = cls.objects.get_or_create(**fields)
+    
+    for name, value in kwargs.items():
+      item = getattr(obj, name)
+      if isinstance(item, Model):
+        setattr(obj, name, item.getSimplifiedObject())
+    return (obj, isNew)
 
   class Meta:
     abstract = True
@@ -128,10 +142,6 @@ class ModelAdmin(admin.ModelAdmin):
 
     for field in self._baseFields:
       val = form.cleaned_data.get(field.name)
-      if type(field) == CharField:
-        setattr(obj, field.name, convert(val, config='s2t'))
-      elif val:
-        setattr(obj, field.name, val)
       fields[field.name] = val
 
     if not lang:
@@ -144,6 +154,9 @@ class ModelAdmin(admin.ModelAdmin):
       fields['create_date'] = strftime("%Y-%m-%d %H:%M:%S", cur_time)
 
     if is_traditional(lang):
+      """
+      convert value to simplifiedObj first
+      """
       simplifiedObj, isNew = model.cloneWithSimplified(**fields)
       if (not (self._hasModifyDate and
         not isNew and simplifiedObj.modify_date > obj.modify_date)):
@@ -152,6 +165,13 @@ class ModelAdmin(admin.ModelAdmin):
           setattr(simplifiedObj, field.name, convert(text))
           fields[field.name] = text
         simplifiedObj.save()
+
+      """
+      convert value to traditional
+      """
+      for name, value in fields.items():
+        if type(value) == str or type(value) == unicode:
+          setattr(obj, name, convert(value, config='s2t'))
 
     if self._hasModifyDate:
       obj.modify_date = strftime("%Y-%m-%d %H:%M:%S", cur_time)
