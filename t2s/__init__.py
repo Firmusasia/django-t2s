@@ -32,7 +32,7 @@ SUCH DAMAGE.
 
 import t2s
 
-VERSION = '0.0.1-alpha'
+VERSION = '1.0.0'
 
 def get_version(*args, **kwargs):
   return VERSION
