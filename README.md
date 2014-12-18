@@ -7,7 +7,7 @@ a very simple usage django utility for t2s
 ### Installation
 
 ```sh
-$ git clone git@bitbucket.org:yorkiefixer/django-t2s.git
+$ git clone git@github.com:yorkie/django-t2s.git
 ```
 
 ### Usage
